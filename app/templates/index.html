@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SISCO — Sistema Inteligente de Seguridad Ciudadana</title>
+    <meta name="description" content="Dashboard en tiempo real de denuncias policiales SIDPOL — PNP / MININTER Peru">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Leaflet Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --bg-base:     #07090f;
+            --bg-card:     rgba(13, 19, 36, 0.9);
+            --border:      rgba(79, 142, 247, 0.14);
+            --text-main:   #e8edf5;
+            --text-muted:  #7a8aaa;
+            --text-dim:    #3a4a68;
+            --accent-blue: #4f8ef7;
+            --accent-red:  #e0304e;
+            --accent-green:#1cd891;
+            --accent-amber:#f0a500;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            background-image:
+                radial-gradient(ellipse at 8% 15%,  rgba(79,142,247,.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 92% 85%,  rgba(224,48,78,.06)  0%, transparent 50%);
+        }
+
+        /* ── HEADER ─────────────────────────────────── */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.1rem 2.5rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(7,9,15,.97);
+            backdrop-filter: blur(14px);
+            position: sticky; top: 0; z-index: 999;
+        }
+
+        .logo { display: flex; align-items: center; gap: .875rem; }
+        .logo-badge {
+            background: linear-gradient(135deg, #1c3599, #4f8ef7);
+            color: #fff;
+            font-weight: 800; font-size: .78rem; letter-spacing: .12em;
+            padding: .35rem .8rem; border-radius: 7px;
+        }
+        .logo-name { font-size: .95rem; font-weight: 700; }
+        .logo-sub  { font-size: .65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+
+        .live-pill {
+            display: flex; align-items: center; gap: .5rem;
+            background: rgba(28,216,145,.07);
+            border: 1px solid rgba(28,216,145,.2);
+            color: var(--accent-green);
+            font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+            padding: .38rem 1rem; border-radius: 999px;
+        }
+        .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-green);
+            animation: blink 1.8s infinite;
+        }
+        @keyframes blink {
+            0%   { box-shadow: 0 0 0 0   rgba(28,216,145,.8); }
+            70%  { box-shadow: 0 0 0 9px rgba(28,216,145,0);  }
+            100% { box-shadow: 0 0 0 0   rgba(28,216,145,0);  }
+        }
+
+        /* ── LAYOUT ──────────────────────────────────── */
+        main { max-width: 1500px; margin: 0 auto; padding: 1.75rem 2.5rem 3rem; }
+
+        /* ── STAT CARDS ──────────────────────────────── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+        @media(max-width:1050px){ .stats-row{ grid-template-columns:repeat(2,1fr); } }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            padding: 1.4rem 1.6rem;
+            backdrop-filter: blur(10px);
+            transition: transform .2s, box-shadow .2s;
+            position: relative; overflow: hidden;
+        }
+        .card::after {
+            content: ''; position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-blue), transparent);
+            opacity: .5;
+        }
+        .card.danger::after  { background: linear-gradient(90deg, transparent, var(--accent-red),  transparent); }
+        .card.wide           { grid-column: span 2; }
+        .card:hover          { transform: translateY(-3px); box-shadow: 0 12px 30px -8px #0006; }
+
+        .card-label { font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .7rem; }
+        .card-value { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+        .card-value.blue   { color: var(--accent-blue);  }
+        .card-value.red    { color: var(--accent-red);   }
+        .card-value.muted  { font-size: 1.1rem; font-weight: 600; color: var(--text-muted); }
+
+        /* ── MIDDLE ROW: MAP + CHARTS ─────────────────── */
+        .mid-row {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+        @media(max-width:950px){ .mid-row{ grid-template-columns:1fr; } }
+
+        /* ── PANEL ───────────────────────────────────── */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+        .panel-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1rem 1.4rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-title { font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--text-muted); }
+        .panel-tag   { font-size: .65rem; color: var(--text-dim); }
+
+        /* ── MAP ─────────────────────────────────────── */
+        #sisco-map { height: 420px; width: 100%; background: #0d1220; position: relative; }
+
+        /* Leaflet overrides for dark theme */
+        .leaflet-container { background: #0d1220 !important; }
+        .leaflet-tile      { filter: brightness(.6) saturate(.3) hue-rotate(190deg); }
+        .leaflet-popup-content-wrapper {
+            background: #0f172a; border: 1px solid var(--border);
+            color: var(--text-main); border-radius: 10px; box-shadow: 0 8px 24px #0008;
+        }
+        .leaflet-popup-tip { background: #0f172a; }
+
+        /* Leyenda del mapa */
+        .map-legend {
+            position: absolute; bottom: 12px; right: 12px; z-index: 1000;
+            background: rgba(13,19,36,.92); border: 1px solid var(--border);
+            border-radius: 10px; padding: .7rem 1rem; backdrop-filter: blur(8px);
+        }
+        .map-legend-title { font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .5rem; }
+        .map-legend-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; font-size: .68rem; color: var(--text-muted); }
+        .map-legend-circle { border-radius: 50%; flex-shrink: 0; }
+
+        /* ── BAR CHARTS ──────────────────────────────── */
+        .bars { padding: 1.1rem 1.4rem; display: flex; flex-direction: column; gap: .8rem; }
+        .bar-row {}
+        .bar-labels {
+            display: flex; justify-content: space-between;
+            font-size: .75rem; margin-bottom: .28rem;
+            color: var(--text-main);
+        }
+        .bar-labels span:last-child { color: var(--text-muted); font-weight: 600; }
+        .bar-track { height: 5px; background: rgba(255,255,255,.05); border-radius: 999px; overflow: hidden; }
+        .bar-fill  { height: 100%; border-radius: 999px; background: linear-gradient(90deg,#1c3599,#4f8ef7); transition: width .9s ease; }
+        .bar-fill.red { background: linear-gradient(90deg,#8b0f27,#e0304e); }
+
+        /* ── CHARTS COLUMN ───────────────────────────── */
+        .charts-col { display: flex; flex-direction: column; gap: 1.1rem; }
+
+        /* ── FEED TABLE ──────────────────────────────── */
+        .table-wrap { width: 100%; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        thead th {
+            padding: .8rem 1.2rem;
+            font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+            color: var(--text-dim);
+            background: rgba(0,0,0,.3);
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+        tbody td { padding: .78rem 1.2rem; border-bottom: 1px solid rgba(255,255,255,.04); font-size: .82rem; vertical-align: middle; }
+        tbody tr { transition: background .18s; }
+        tbody tr:hover { background: rgba(255,255,255,.025); }
+        tbody tr.critical { background: rgba(224,48,78,.055); border-left: 3px solid var(--accent-red); }
+
+        /* ── BADGES ──────────────────────────────────── */
+        .badge {
+            display: inline-block; padding: .18rem .6rem;
+            border-radius: 999px; font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+        }
+        .badge-ok  { background: rgba(122,138,170,.12); color: var(--text-muted); border: 1px solid rgba(122,138,170,.2); }
+        .badge-err {
+            background: rgba(224,48,78,.13); color: #f87191; border: 1px solid rgba(224,48,78,.25);
+            animation: blink-badge 2.2s infinite;
+        }
+        @keyframes blink-badge {
+            0%,100%{ background: rgba(224,48,78,.13); }
+            50%    { background: rgba(224,48,78,.32); }
+        }
+
+        /* ── ACTION BTN ──────────────────────────────── */
+        .btn-patrulla {
+            background: rgba(224,48,78,.12); color: #f87191;
+            border: 1px solid rgba(224,48,78,.25);
+            padding: .28rem .75rem; border-radius: 7px;
+            font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+            cursor: pointer; transition: background .2s, transform .1s;
+        }
+        .btn-patrulla:hover { background: rgba(224,48,78,.28); transform: scale(1.05); }
+        .sent { color: var(--accent-green); font-weight: 700; font-size: .75rem; }
+
+        /* ── NEW-ROW ANIM ─────────────────────────────── */
+        @keyframes row-in {
+            from { opacity:0; transform:translateY(-6px); background: rgba(79,142,247,.12); }
+            to   { opacity:1; transform:translateY(0);    }
+        }
+        .row-new { animation: row-in .9s ease-out; }
+
+        .empty { text-align:center; padding:2.5rem; color:var(--text-dim); font-style:italic; font-size:.82rem; }
+    </style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+    <div class="logo">
+        <div class="logo-badge">SISCO</div>
+        <div>
+            <div class="logo-name">Sistema Inteligente de Seguridad Ciudadana</div>
+            <div class="logo-sub">Denuncias SIDPOL &mdash; PNP / MININTER &nbsp;|&nbsp; Big Data Pipeline en Tiempo Real</div>
+        </div>
+    </div>
+    <div style="display:flex;gap:.75rem;align-items:center">
+        <button id="btn-reset" onclick="resetStats()" style="background:rgba(224,48,78,.12);color:#f87191;border:1px solid rgba(224,48,78,.25);padding:.38rem 1rem;border-radius:999px;font-size:.72rem;font-weight:700;cursor:pointer;letter-spacing:.06em">REINICIAR A 0</button>
+        <div class="live-pill"><div class="dot"></div>STREAM EN VIVO</div>
+    </div>
+</header>
+
+<main>
+
+    <!-- ═══ STAT CARDS ═══ -->
+    <div class="stats-row">
+        <div class="card">
+            <div class="card-label">Total Denuncias Procesadas</div>
+            <div class="card-value blue" id="s-total">0</div>
+        </div>
+        <div class="card danger">
+            <div class="card-label">Alertas Criticas</div>
+            <div class="card-value red" id="s-crit">0</div>
+        </div>
+        <div class="card wide">
+            <div class="card-label">Ultima Alerta Critica</div>
+            <div class="card-value muted" id="s-ultima">Sin alertas criticas recientes</div>
+        </div>
+    </div>
+
+    <!-- ═══ MAP + CHARTS ═══ -->
+    <div class="mid-row">
+
+        <!-- MAPA DE CALOR -->
+        <div class="panel">
+            <div class="panel-head">
+                <span class="panel-title">Mapa de Calor — Denuncias por Departamento</span>
+                <span class="panel-tag">Leaflet + Datos SIDPOL</span>
+            </div>
+            <div id="sisco-map"></div>
+            <div class="map-legend">
+                <div class="map-legend-title">Intensidad de Denuncias</div>
+                <div class="map-legend-row"><div class="map-legend-circle" style="width:14px;height:14px;background:#ef4444"></div>Muy Alta (&gt;80%)</div>
+                <div class="map-legend-row"><div class="map-legend-circle" style="width:12px;height:12px;background:#f97316"></div>Alta (60-80%)</div>
+                <div class="map-legend-row"><div class="map-legend-circle" style="width:10px;height:10px;background:#f59e0b"></div>Media (40-60%)</div>
+                <div class="map-legend-row"><div class="map-legend-circle" style="width:8px;height:8px;background:#3b82f6"></div>Baja (20-40%)</div>
+                <div class="map-legend-row"><div class="map-legend-circle" style="width:6px;height:6px;background:#60a5fa"></div>Muy Baja (&lt;20%)</div>
+            </div>
+        </div>
+
+        <!-- CHARTS COLUMN -->
+        <div class="charts-col">
+            <div class="panel">
+                <div class="panel-head"><span class="panel-title">Top Tipos de Hecho</span></div>
+                <div class="bars" id="chart-tipos"><div style="color:var(--text-dim);font-size:.8rem;font-style:italic">Esperando datos...</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-head"><span class="panel-title">Top Departamentos</span></div>
+                <div class="bars" id="chart-deptos"><div style="color:var(--text-dim);font-size:.8rem;font-style:italic">Esperando datos...</div></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ═══ LIVE FEED ═══ -->
+    <div class="panel">
+        <div class="panel-head">
+            <span class="panel-title">Feed de Denuncias en Tiempo Real</span>
+            <span class="panel-tag">Kafka &mdash; denuncias_sidpol</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Estado</th>
+                        <th>Tipo de Hecho</th>
+                        <th>Modalidad</th>
+                        <th>Departamento</th>
+                        <th>Provincia</th>
+                        <th>Distrito</th>
+                        <th>Casos</th>
+                        <th>Anio / Mes</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody id="feed-body">
+                    <tr><td colspan="9" class="empty">Esperando denuncias desde Kafka...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</main>
+
+<script>
+// ─── COORDENADAS POR DEPARTAMENTO (PERU) ────────────────────────
+const DEPT_COORDS = {
+    "LIMA":          [-12.0464, -77.0428],
+    "AREQUIPA":      [-16.4090, -71.5375],
+    "CUSCO":         [-13.5319, -71.9675],
+    "PIURA":         [-5.1945,  -80.6328],
+    "LA LIBERTAD":   [-8.1091,  -79.0215],
+    "LAMBAYEQUE":    [-6.7714,  -79.8409],
+    "JUNIN":         [-11.9975, -75.2049],
+    "CAJAMARCA":     [-7.1637,  -78.5109],
+    "PUNO":          [-15.8422, -70.0213],
+    "CALLAO":        [-12.0500, -77.1167],
+    "ICA":           [-14.0678, -75.7286],
+    "LORETO":        [-3.7437,  -73.2516],
+    "SAN MARTIN":    [-6.3850,  -76.8748],
+    "ANCASH":        [-9.5299,  -77.5278],
+    "HUANUCO":       [-9.9306,  -76.2422],
+    "UCAYALI":       [-8.3791,  -74.5539],
+    "AYACUCHO":      [-13.1588, -74.2236],
+    "APURIMAC":      [-14.0350, -72.8814],
+    "MOQUEGUA":      [-17.1933, -70.9350],
+    "TACNA":         [-18.0146, -70.2536],
+    "TUMBES":        [-3.5669,  -80.4516],
+    "PASCO":         [-10.6800, -75.6541],
+    "HUANCAVELICA":  [-12.7864, -74.9756],
+    "MADRE DE DIOS": [-12.5933, -69.1891],
+    "AMAZONAS":      [-6.2319,  -77.8700],
+};
+
+// Alias: nombres del CSV SIDPOL → nombres del mapa
+const DEPT_ALIASES = {
+    "LIMA METROPOLITANA":       "LIMA",
+    "LIMA PROVINCIAS":          "LIMA",
+    "LIMA":                     "LIMA",
+    "PROV. CONST. DEL CALLAO":  "CALLAO",
+    "PROVINCIA CONST. CALLAO":  "CALLAO",
+    "CONST. CALLAO":            "CALLAO",
+    "SAN MARTIN":               "SAN MARTIN",
+    "MADRE DE DIOS":            "MADRE DE DIOS",
+    "LA LIBERTAD":              "LA LIBERTAD",
+};
+
+// Resolver nombre del departamento
+function resolverDepto(raw) {
+    const upper = raw ? raw.toUpperCase().trim() : '';
+    return DEPT_ALIASES[upper] || upper;
+}
+
+// ─── INIT MAP ────────────────────────────────────────────────────
+const map = L.map('sisco-map', {
+    center: [-9.5, -75.5],
+    zoom: 5,
+    zoomControl: true,
+    attributionControl: false
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 17
+}).addTo(map);
+
+// ─── BUBBLE MARKERS POR DEPARTAMENTO ─────────────────────────────
+const deptMarkers = {};
+const deptLabels  = {};
+
+// Función de color según intensidad (0→azul, 0.5→naranja, 1→rojo)
+function getColor(t) {
+    if (t > 0.8) return '#ef4444';  // rojo intenso
+    if (t > 0.6) return '#f97316';  // naranja
+    if (t > 0.4) return '#f59e0b';  // ámbar
+    if (t > 0.2) return '#3b82f6';  // azul
+    return '#60a5fa';                // azul claro
+}
+
+function getGlow(t) {
+    if (t > 0.8) return 'rgba(239,68,68,.6)';
+    if (t > 0.6) return 'rgba(249,115,22,.5)';
+    if (t > 0.4) return 'rgba(245,158,11,.4)';
+    return 'rgba(59,130,246,.35)';
+}
+
+Object.entries(DEPT_COORDS).forEach(([dept, coords]) => {
+    // Círculo de glow (aura exterior)
+    const glow = L.circleMarker(coords, {
+        radius: 0, stroke: false, fillColor: 'transparent', fillOpacity: 0
+    }).addTo(map);
+
+    // Círculo principal
+    const m = L.circleMarker(coords, {
+        radius: 0, color: '#fff', weight: 1.5,
+        fillColor: 'transparent', fillOpacity: 0
+    }).addTo(map).bindPopup(`<strong>${dept}</strong><br>Sin datos aún`);
+
+    // Label del departamento
+    const label = L.tooltip({
+        permanent: true, direction: 'center', className: 'dept-label', offset: [0, 0]
+    });
+
+    deptMarkers[dept] = { main: m, glow: glow, label: label };
+});
+
+
+function updateHeatmap(mapaDepartamentos) {
+    if (!mapaDepartamentos || mapaDepartamentos.length === 0) return;
+
+    // Consolidar departamentos (LIMA METROPOLITANA + LIMA PROVINCIAS → LIMA)
+    const consolidated = {};
+    mapaDepartamentos.forEach(item => {
+        const dept = resolverDepto(item.departamento);
+        if (!dept) return;
+        consolidated[dept] = (consolidated[dept] || 0) + item.cantidad;
+    });
+
+    // Convertir a array y ordenar
+    const entries = Object.entries(consolidated).sort((a,b) => b[1] - a[1]);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+
+    entries.forEach(([dept, cantidad]) => {
+        const coords = DEPT_COORDS[dept];
+        if (!coords) return;
+
+        const marker = deptMarkers[dept];
+        if (!marker) return;
+
+        const intensity = cantidad / maxVal;
+        const color     = getColor(intensity);
+        const glowColor = getGlow(intensity);
+
+        // Radio proporcional: min 6px, max 35px
+        const radius     = Math.max(6, Math.round(intensity * 32) + 4);
+        const glowRadius  = radius + 8;
+
+        // Actualizar glow
+        marker.glow.setStyle({
+            radius: glowRadius,
+            fillColor: glowColor,
+            fillOpacity: 0.35,
+            stroke: false
+        });
+
+        // Actualizar círculo principal
+        marker.main.setStyle({
+            radius: radius,
+            fillColor: color,
+            fillOpacity: 0.85,
+            color: '#fff',
+            weight: intensity > 0.5 ? 2 : 1
+        });
+
+        // Popup con datos
+        const pct = (intensity * 100).toFixed(1);
+        marker.main.setPopupContent(
+            `<div style="text-align:center">`
+            + `<strong style="font-size:1.05em">${dept}</strong><br>`
+            + `<span style="color:${color};font-weight:800;font-size:1.3em">${cantidad.toLocaleString()}</span><br>`
+            + `<span style="color:#7a8aaa;font-size:.82em">denuncias (${pct}% del máx.)</span>`
+            + `</div>`
+        );
+    });
+}
+
+// ─── RENDER BARS ─────────────────────────────────────────────────
+function renderBars(id, items, keyField, redMode) {
+    const el = document.getElementById(id);
+    if (!items || items.length === 0) return;
+    const max = items[0].cantidad || 1;
+    el.innerHTML = items.map(it => {
+        const pct = Math.round((it.cantidad / max) * 100);
+        return `<div class="bar-row">
+            <div class="bar-labels"><span>${it[keyField]}</span><span>${it.cantidad.toLocaleString()}</span></div>
+            <div class="bar-track"><div class="bar-fill${redMode ? ' red' : ''}" style="width:${pct}%"></div></div>
+        </div>`;
+    }).join('');
+}
+
+// ─── FEED TABLE ──────────────────────────────────────────────────
+let seenIds = new Set();
+
+function renderTable(events) {
+    const tbody = document.getElementById('feed-body');
+    if (!events || events.length === 0) return;
+
+    let html = '';
+    events.forEach(ev => {
+        const isCrit = ev.is_critical;
+        const isNew  = !seenIds.has(ev.id);
+        if (isNew) seenIds.add(ev.id);
+
+        const badge  = isCrit
+            ? '<span class="badge badge-err">Critico</span>'
+            : '<span class="badge badge-ok">Normal</span>';
+
+        let action = '&mdash;';
+        if (ev.estado_respuesta === 'PATRULLA ENVIADA') {
+            action = '<span class="sent">Patrulla enviada</span>';
+        } else if (isCrit) {
+            action = `<button class="btn-patrulla" onclick="dispatch('${ev.id}')">Enviar Patrulla</button>`;
+        }
+
+        html += `<tr class="${isCrit ? 'critical' : ''} ${isNew ? 'row-new' : ''}">
+            <td>${badge}</td>
+            <td style="font-weight:600">${ev.tipo_hecho || '&mdash;'}</td>
+            <td style="color:var(--text-muted)">${ev.modalidad || '&mdash;'}</td>
+            <td>${ev.departamento || '&mdash;'}</td>
+            <td>${ev.provincia || '&mdash;'}</td>
+            <td>${ev.distrito || '&mdash;'}</td>
+            <td style="font-weight:700;color:var(--accent-blue)">${ev.cantidad || 1}</td>
+            <td style="color:var(--text-dim)">${ev.anio || '&mdash;'} / ${ev.mes || '&mdash;'}</td>
+            <td>${action}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+
+    if (seenIds.size > 200) {
+        const arr = [...seenIds];
+        seenIds = new Set(arr.slice(arr.length - 100));
+    }
+}
+
+// ─── MAIN POLL ───────────────────────────────────────────────────
+async function fetchData() {
+    try {
+        const res  = await fetch('/api/data');
+        const data = await res.json();
+        const s    = data.stats;
+
+        document.getElementById('s-total').textContent  = (s.total_denuncias  || 0).toLocaleString();
+        document.getElementById('s-crit').textContent   = (s.alertas_criticas || 0).toLocaleString();
+        document.getElementById('s-ultima').textContent = s.ultima_alerta || 'Sin alertas criticas recientes';
+
+        renderBars('chart-tipos',  s.top_tipos,         'tipo',         false);
+        renderBars('chart-deptos', s.top_departamentos, 'departamento', true);
+
+        // Usar TODOS los departamentos para el mapa (no solo top 5)
+        updateHeatmap(s.mapa_departamentos);
+        renderTable(data.events);
+    } catch(e) {
+        console.error('SISCO fetch error:', e);
+    }
+}
+
+setInterval(fetchData, 1500);
+fetchData();
+
+// ─── DISPATCH ACTION ─────────────────────────────────────────────
+async function dispatch(id) {
+    try {
+        await fetch('/api/dispatch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id })
+        });
+        fetchData();
+    } catch(e) { console.error(e); }
+}
+
+// ─── RESET STATS ─────────────────────────────────────────────────
+async function resetStats() {
+    if (!confirm('¿Reiniciar todas las estadísticas a 0?')) return;
+    try {
+        await fetch('/api/reset', { method: 'POST' });
+        // Limpiar mapa
+        Object.values(deptMarkers).forEach(m => {
+            m.main.setStyle({ radius: 0, fillOpacity: 0 });
+            m.glow.setStyle({ radius: 0, fillOpacity: 0 });
+        });
+        seenIds.clear();
+        fetchData();
+    } catch(e) { console.error(e); }
+}
+</script>
+
+</body>
+</html>
