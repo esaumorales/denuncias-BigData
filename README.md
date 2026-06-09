@@ -1,106 +1,85 @@
-# SISCO — Sistema Inteligente de Seguridad Ciudadana
+# SISCO — Sistema Inteligente de Seguridad Ciudadana (Big Data)
 
-Este proyecto es una plataforma de **Big Data y Streaming en tiempo real** que simula, procesa y visualiza denuncias policiales en Perú (basado en datos reales del SIDPOL del Ministerio del Interior).
-
-El sistema lee millones de registros históricos, los normaliza, los envía a través de Apache Kafka como un flujo de eventos en vivo, y los muestra en un dashboard interactivo web.
+Este documento explica en detalle la estructura completa del proyecto, para qué sirve cada componente y el **orden exacto de ejecución** de todo el pipeline (desde la limpieza de los datos crudos hasta la visualización en tiempo real en el Dashboard web).
 
 ---
 
-## 🏗️ Arquitectura del Sistema
+## 📁 1. Estructura de Carpetas y Archivos
 
-La arquitectura implementa un pipeline clásico de datos: **Bronze (Crudo) → Silver (Limpio) → Streaming (Kafka) → Visualización.**
+Cada carpeta tiene un propósito específico dentro de nuestra **Arquitectura Lambda** (que mezcla procesamiento Batch histórico y procesamiento Streaming en tiempo real).
 
-1. **`data_raw/` (Capa Bronze)**
-   - Contiene el dataset crudo original del SIDPOL: `DATASET_Denuncias_Policiales_Ene 2018 a Abr 2026.csv`.
-   - Tiene millones de registros, valores nulos, y nombres de columnas técnicas.
+### `data/` (Capa de Datos Locales)
+* **`raw/` (Bronce):** Aquí vive el archivo original en formato `.csv` descargado directamente del Ministerio del Interior (datos sucios, columnas mal escritas, archivos pesados de millones de filas).
+* **`clean/` (Plata):** Aquí se guardan los datos limpios en formato **Parquet**. Parquet es el estándar de oro en Big Data porque pesa muchísimo menos y es extremadamente rápido de leer. Aquí también se guarda `sisco_stats.json` que funciona como nuestra base de datos local para mantener los contadores del Dashboard.
 
-2. **`prepare_data.py` (Proceso ETL Bronze → Silver)**
-   - Un script de preparación de datos offline.
-   - **Qué hace:** Lee el CSV crudo, renombra las columnas a nombres más amigables (ej. `DPTO_HECHO_NEW` → `departamento`), elimina filas vacías, capitaliza correctamente textos (ej. "LIMA" → "Lima"), y guarda un archivo optimizado en `data_clean/`.
+### `scripts/` (ETL de Preparación y Carga)
+* **`prepare_data.py`:** Es el script que convierte el CSV crudo a Parquet limpio. Se ejecuta una sola vez al principio del proyecto.
+* **`init_historico.py`:** Simula la carga masiva (Batch) del historial. Cuando el usuario da clic en "REINICIAR A 0", este script inyecta de golpe todos los datos de 2018 a 2025 para que el Dashboard no empiece vacío.
 
-3. **`data_clean/` (Capa Silver)**
-   - Aquí se guarda `denuncias_sidpol_clean.csv`. Es el archivo que realmente consumimos, mucho más ligero y listo para enviar al dashboard.
-   - También almacena `sisco_stats.json`, que guarda la persistencia del dashboard.
+### `streaming/` (La Capa de Velocidad / Speed Layer)
+* **`producer.py`:** Simula el sistema en vivo de las comisarías del Perú. Se queda "escuchando" el Parquet y lanza únicamente los casos del año **2026** uno por uno hacia el tópico de Kafka llamado `denuncias_sidpol`, simulando un flujo en tiempo real (Streaming).
+* **`flink_job.py`:** El cerebro analítico en tiempo real. Este script de **Apache Flink** captura todo lo que cae en Kafka, detecta si es una "Alerta Crítica" (por ejemplo, picos inusuales de violencia o extorsión), empaqueta el resultado y lo manda a un segundo tópico de Kafka llamado `eventos_procesados`.
 
-4. **`src/denuncias_producer.py` (Productor de Eventos Kafka)**
-   - Es un script en Python que corre dentro del contenedor Docker `denuncias-producer`.
-   - **Qué hace:** Abre el CSV de `data_clean/` y lee línea por línea. Cada registro (denuncia) lo transforma en un archivo JSON y lo envía al topic `denuncias_sidpol` en el broker local de Apache Kafka.
-   - Tiene pausas de 0.5 a 1.5 segundos entre cada envío para **simular tráfico en tiempo real**.
+### `batch/` (La Capa de Volumen / Batch Layer)
+* **`spark_etl.py`:** El cerebro analítico histórico. Usando **Apache Spark**, este script procesa la totalidad del bloque histórico (millones de registros) en memoria distribuida para encontrar patrones a largo plazo, y guarda el reporte final en nuestro Data Lake (MinIO).
 
-5. **Apache Kafka + Zookeeper (El Bus de Mensajes)**
-   - Corren como contenedores de Docker (definidos en `docker-compose.yml`).
-   - Actúan como el sistema circulatorio del proyecto. Todo evento que emite el producer queda guardado en Kafka, y cualquier otra aplicación puede "suscribirse" para leer esos eventos.
+### `app/` (El Dashboard y Consumidor / Serving Layer)
+* **`main.py`:** El archivo principal de la aplicación web (Flask). Inicia el servidor de la página web en el puerto 5000.
+* **`routes.py`:** Controla la lógica de navegación (qué pasa cuando entras a la ruta `/` o a `/api/data`).
+* **`kafka_services.py`:** Es el hilo consumidor constante. Está suscrito al tópico de Kafka `eventos_procesados` (los que Flink ya analizó). A medida que recibe datos, actualiza la memoria.
+* **`stats_store.py`:** La memoria viva del Dashboard. Suma los contadores, arma el top de departamentos y guarda el mapa de ubicaciones.
+* **`templates/`:** Contiene los archivos HTML (`index.html` y `denuncia.html`). El mapa de calor, los gráficos y el diseño visual están programados aquí usando HTML, CSS, JavaScript, Chart.js y Leaflet.js.
 
-6. **`app/dashboard.py` (Dashboard Backend / Consumidor Kafka)**
-   - Es una aplicación web construida en **Flask (Python)**.
-   - Tiene un hilo secundario (`kafka_listener`) que está constantemente conectado a Kafka consumiendo del topic `denuncias_sidpol`.
-   - Cada evento que llega lo suma a contadores globales (Total, Alertas Críticas, Mapa, etc.) y mantiene una lista de los últimos 50 eventos.
-   - Guarda los contadores periódicamente en `sisco_stats.json` para no perder la data al reiniciar.
-   - Ofrece una API REST en `/api/data` para el Frontend.
+### `config/`
+* **`settings.py`:** Almacena variables de entorno, como la IP del servidor Kafka, los nombres de los tópicos y rutas de archivos, para no tener que escribirlas manualmente en todos lados.
 
-7. **`app/templates/index.html` (Dashboard Frontend)**
-   - La interfaz visual del usuario. Un SPA (Single Page Application) oscuro, moderno y dinámico.
-   - Consulta `/api/data` cada 1.5 segundos.
-   - Usa **Leaflet.js** para dibujar un **mapa de burbujas proporcionales**. Mapea los nombres de los departamentos a coordenadas de latitud/longitud en Perú. El tamaño y color (azul → naranja → rojo) de la burbuja dependen del porcentaje de denuncias de cada región en tiempo real.
-   - Permite enviar "patrullas virtuales" haciendo POST a `/api/dispatch`.
+### Archivos de la Raíz (DevOps & Orquestación)
+* **`docker-compose.yml`:** El manifiesto de infraestructura. Descarga y enciende los motores de Big Data: Zookeeper, Kafka, MinIO, Jupyter-PySpark, JobManager y TaskManager de Flink.
+* **`Dockerfile` y `Dockerfile.flink`:** Instrucciones de instalación para crear máquinas virtuales (contenedores) a nuestra medida.
+* **`orquestador.py`:** El gran controlador automático. Ejecuta todos los comandos en el orden correcto para que el usuario no tenga que levantar las cosas una por una a mano.
 
 ---
 
-## 🔄 El Flujo de Datos Paso a Paso (Data Lineage)
+## ⚙️ 2. Orden de Ejecución (Paso a Paso)
 
-1. **ETL previo:** Corres `python prepare_data.py`. Esto transforma el CSV pesado en un CSV rápido y limpio en la carpeta `data_clean`.
-2. **Arranque de Infra:** Corres `docker-compose up -d`. Esto levanta Kafka, Zookeeper, y el `denuncias-producer`.
-3. **El Producer transmite:** En su contenedor, el producer empieza a leer el CSV limpio. Fila 1: "Robo en Lima", lo convierte a JSON `{"tipo_hecho":"Robo", "departamento":"LIMA"}` y lo inyecta a Kafka.
-4. **Dashboard Backend escucha:** Ejecutas `python app/dashboard.py`. El listener de Kafka atrapa el JSON. Actualiza el contador `stats["LIMA"] += 1`. Si "Robo" es crítico, aumenta `stats["alertas_criticas"]`.
-5. **Dashboard Frontend dibuja:** El navegador pide `/api/data`. Recibe el JSON completo, actualiza el HTML, aumenta la burbuja roja de Lima en el mapa de Leaflet, y desliza la nueva denuncia en la tabla con un pequeño efecto visual.
-6. **Persistencia:** Si cierras el dashboard y lo vuelves a abrir, el backend lee el estado anterior de `sisco_stats.json` y la cuenta sigue exactamente donde la dejaste.
+Si fueras a ejecutar el proyecto manualmente desde cero, este es el flujo lógico y secuencial (que nuestro `orquestador.py` hace por ti en la vida real):
 
----
+### FASE 1: Limpieza Inicial (ETL Bronce a Plata)
+1. Ejecutas **`python scripts/prepare_data.py`**
+   * *Acción:* Agarra el CSV sucio de 6.8 millones de filas y crea un archivo `denuncias_sidpol_clean.parquet`. (Solo se hace 1 vez).
 
-## 🛠️ Cómo Iniciar y Reiniciar el Proyecto
+### FASE 2: Despliegue de Infraestructura
+2. Ejecutas **`docker-compose up -d`**
+   * *Acción:* Enciende todo el cluster de servidores Big Data (Kafka, Flink, Spark, MinIO). 
 
-### 1. Iniciar desde Cero Absoluto
-Si quieres purgar todo (borrar historial de Kafka) y arrancar como si fuera la primera vez:
-```bash
-# Apagar todo y borrar volumenes (destruye base de datos de kafka)
-docker-compose down -v
+### FASE 3: Inicialización del Histórico (La Base)
+3. Ejecutas **`python scripts/init_historico.py`**
+   * *Acción:* Carga instantáneamente al backend todo el rango histórico (2018 a 2025) para que el mapa de calor y las gráficas comiencen llenas, simulando lo que ya pasó hasta ayer.
 
-# Limpiar y regenerar el archivo CSV limpio (si hubo cambios en el raw)
-python prepare_data.py
+### FASE 4: El Motor de Reglas en Tiempo Real (Flink)
+4. Ejecutas el Job de Flink: **`docker exec flink-jobmanager bash -c "flink run -py /tmp/flink_job.py"`**
+   * *Acción:* Flink se queda corriendo en las sombras, conectándose a Kafka, esperando que comiencen a caer las denuncias nuevas.
 
-# Levantar infraestructura (Kafka + Producer)
-docker-compose up -d
+### FASE 5: Levantar el Dashboard (UI)
+5. Ejecutas **`python app/main.py`**
+   * *Acción:* Prende la interfaz web (`http://localhost:5000`) y activa el consumidor de Kafka en el backend para atrapar todo lo que Flink envíe.
 
-# Ejecutar el backend del Dashboard
-python app/dashboard.py
-```
+### FASE 6: Activar el Caño del Streaming (Live Data)
+6. Ejecutas **`python streaming/producer.py`**
+   * *Acción:* Este script se comporta como la "vida real". Empieza a enviar las denuncias del año **2026** hacia Kafka gota a gota.
+   * Flink las recibe de Kafka, las evalúa, y se las envía al Dashboard (Flask), quien las dibuja mágicamente en la pantalla.
 
-### 2. Reiniciar solo los contadores visuales del Dashboard
-Si no quieres tocar Docker ni Kafka, pero quieres que el Dashboard visualmente vuelva a estar en 0:
-- Entra al Dashboard Web ([http://localhost:5000](http://localhost:5000))
-- Haz clic en el botón **REINICIAR A 0** arriba a la derecha. Esto purgará el `sisco_stats.json` y reseteará los arrays de memoria.
+### FASE 7: El Proceso Batch de Fondo
+7. Ejecutas **`docker exec jupyter-pyspark spark-submit /home/jovyan/work/batch/spark_etl.py`**
+   * *Acción:* Como un proceso nocturno, PySpark barre todo el historial para generar resúmenes estáticos avanzados en el Data Lake de MinIO, sin interrumpir el flujo del streaming.
 
-### 3. Matar puertos atascados
-Si obtienes errores de que el puerto `5000` ya está en uso:
-- Presiona `Ctrl + C` en tu terminal actual.
-- Usa el comando `taskkill /F /IM python.exe` (cuidado, mata todos los procesos de Python).
-- Vuelve a correr `python app/dashboard.py`.
+*(Nota: Nuestro script `orquestador.py` hace los pasos 2 al 7 automáticamente con solo un clic).*
 
 ---
 
-## 📁 Estructura de Archivos Principal
+## 🎨 3. Prompt para Generar Arquitectura (Midjourney / DALL-E)
 
-```
-Datos-Bigdata/
-├── data_raw/                          # CSV crudo de MININTER
-├── data_clean/                        # CSV limpio y JSON persistente de estadísticas
-├── prepare_data.py                    # Script ETL offline (Bronze -> Silver)
-├── docker-compose.yml                 # Define Kafka, Zookeeper y el Producer
-├── src/
-│   └── denuncias_producer.py          # Script de envío de mensajes hacia Kafka
-├── app/
-│   ├── dashboard.py                   # Servidor Web Flask (Backend & Kafka Consumer)
-│   └── templates/
-│       └── index.html                 # Frontend SPA HTML/CSS/JS (Leaflet map)
-└── README.md                          # Esta documentación
-```
+Si necesitas generar un diagrama espectacular para tu presentación, puedes usar el siguiente Prompt en cualquier IA de generación de imágenes:
+
+> **Prompt:**
+> *A professional and highly detailed isometric Big Data architecture diagram for a system called "SISCO". The diagram follows the Lambda Architecture pattern. On the left side, show a data source labeled "SIDPOL (CSV)". From there, the data flows into a central message broker labeled "Apache Kafka" (streaming bus). Inside Kafka, show two TOPICS labeled "denuncias_sidpol" and "eventos_procesados". From Kafka, the data splits into two paths (Speed Layer and Batch Layer). The top path (Speed Layer) goes to a node labeled "Apache Flink (Real-Time Rules Engine)" which points to a sleek "Web Dashboard (Flask)". The bottom path (Batch Layer) goes to a node labeled "Apache Spark (ETL Processing)", which points to a data lake storage bucket labeled "MinIO Data Lake". Use a clean, modern cyber-tech color palette with glowing blue, neon orange, and dark background. Include small technology logos for Kafka, Flink, Spark, and Python. Vector illustration style, highly professional, suitable for an enterprise presentation, clear data flow lines with glowing arrows.*

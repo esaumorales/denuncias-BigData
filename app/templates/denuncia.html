@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Ciudadano — Nueva Denuncia</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-dark: #f8fafc;
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --border: #e2e8f0;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --danger: #ef4444;
+            --success: #10b981;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.06) 0%, transparent 40%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 540px;
+            padding: 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 3rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Top glow line */
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.7;
+        }
+
+        .header { text-align: center; margin-bottom: 2.5rem; }
+        .logo-badge {
+            display: inline-block;
+            background: rgba(79, 142, 247, 0.1);
+            color: var(--accent);
+            padding: 0.4rem 1.2rem;
+            border-radius: 100px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(79, 142, 247, 0.2);
+        }
+        h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
+        p.subtitle { color: var(--text-muted); font-size: 0.95rem; line-height: 1.5; }
+
+        .form-group { margin-bottom: 1.5rem; position: relative; }
+        
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input, select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: black;
+            padding: 1rem 1.2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--accent);
+            background: rgba(0, 0, 0, 0.4);
+            box-shadow: 0 0 0 4px rgba(79, 142, 247, 0.1);
+        }
+
+        select option {
+            background: var(--bg-dark);
+            color: black;
+            padding: 10px;
+        }
+
+        .btn-submit {
+            width: 100%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1.2rem;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn-submit:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -10px var(--accent);
+        }
+
+        .btn-submit:active { transform: translateY(0); }
+
+        /* Loader */
+        .spinner {
+            display: none;
+            width: 20px; height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .btn-submit.loading .spinner { display: block; }
+        .btn-submit.loading .btn-text { opacity: 0.8; }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 30px; left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--success);
+            color: #000;
+            padding: 1rem 2rem;
+            border-radius: 100px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            box-shadow: 0 10px 30px -10px var(--success);
+            opacity: 0;
+            transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            z-index: 1000;
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 2rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+            text-align: center;
+            width: 100%;
+        }
+        .back-link:hover { color: white; }
+
+        @media (max-width: 600px) {
+            .glass-card { padding: 2rem; }
+            h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="glass-card">
+            <div class="header">
+                <div class="logo-badge">PORTAL CIUDADANO</div>
+                <h1>Nueva Denuncia</h1>
+                <p class="subtitle">Ingrese los datos del hecho. Su reporte será enviado en tiempo real a la central SIDPOL.</p>
+            </div>
+
+            <form id="denunciaForm">
+                <div class="form-group">
+                    <label>Departamento</label>
+                    <select id="departamento" required>
+                        <option value="" disabled selected>Seleccione Departamento...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Provincia</label>
+                    <select id="provincia" required disabled>
+                        <option value="" disabled selected>Seleccione Provincia...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Distrito</label>
+                    <select id="distrito" required disabled>
+                        <option value="" disabled selected>Seleccione Distrito...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Tipo de Delito</label>
+                    <select id="tipo_hecho" required>
+                        <option value="" disabled selected>Seleccione una modalidad...</option>
+                        <option value="ROBO AGRAVADO">Robo Agravado (Crítico)</option>
+                        <option value="HURTO SIMPLE">Hurto Simple</option>
+                        <option value="HOMICIDIO">Homicidio (Crítico)</option>
+                        <option value="EXTORSION">Extorsión</option>
+                        <option value="VIOLACION SEXUAL">Violación Sexual (Crítico)</option>
+                        <option value="ESTAFA">Estafa</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    <span class="spinner"></span>
+                    <span class="btn-text">Enviar a Central SIDPOL</span>
+                </button>
+            </form>
+
+            <a href="/" class="back-link">← Volver al Dashboard</a>
+        </div>
+    </div>
+
+    <!-- Data invisible para Javascript (Evita errores en el IDE) -->
+    <script id="ubigeo-data" type="application/json">
+        {{ ubigeo | tojson | safe }}
+    </script>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        Denuncia ingresada al sistema
+    </div>
+
+    <script>
+        const form = document.getElementById('denunciaForm');
+        const btn = document.getElementById('submitBtn');
+        const toast = document.getElementById('toast');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // UI Loading state
+            btn.classList.add('loading');
+            btn.disabled = true;
+
+            const payload = {
+                departamento: document.getElementById('departamento').value,
+                provincia: document.getElementById('provincia').value,
+                distrito: document.getElementById('distrito').value,
+                tipo_hecho: document.getElementById('tipo_hecho').value
+            };
+
+            try {
+                const res = await fetch('/api/denunciar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    // Show success
+                    form.reset();
+                    toast.classList.add('show');
+                    setTimeout(() => toast.classList.remove('show'), 3500);
+                } else {
+                    alert('Hubo un error al procesar su solicitud.');
+                }
+            } catch (err) {
+                alert('Error de conexión. Asegúrese que el backend está corriendo.');
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        });
+
+        // Lógica de Select en cascada para UBIGEO
+        const ubigeoText = document.getElementById('ubigeo-data').textContent;
+        const ubigeoData = JSON.parse(ubigeoText);
+        
+        const selDept = document.getElementById('departamento');
+        const selProv = document.getElementById('provincia');
+        const selDist = document.getElementById('distrito');
+
+        // Llenar departamentos ordenados
+        Object.keys(ubigeoData).sort().forEach(dept => {
+            const opt = document.createElement('option');
+            opt.value = dept;
+            opt.textContent = dept;
+            selDept.appendChild(opt);
+        });
+
+        selDept.addEventListener('change', (e) => {
+            selProv.innerHTML = '<option value="" disabled selected>Seleccione Provincia...</option>';
+            selDist.innerHTML = '<option value="" disabled selected>Seleccione Distrito...</option>';
+            selProv.disabled = false;
+            selDist.disabled = true;
+            
+            const provincias = ubigeoData[e.target.value] || {};
+            Object.keys(provincias).sort().forEach(prov => {
+                const opt = document.createElement('option');
+                opt.value = prov;
+                opt.textContent = prov;
+                selProv.appendChild(opt);
+            });
+        });
+
+        selProv.addEventListener('change', (e) => {
+            selDist.innerHTML = '<option value="" disabled selected>Seleccione Distrito...</option>';
+            selDist.disabled = false;
+            
+            const dept = selDept.value;
+            const prov = e.target.value;
+            const distritos = ubigeoData[dept][prov] || [];
+            
+            distritos.forEach(dist => {
+                const opt = document.createElement('option');
+                opt.value = dist;
+                opt.textContent = dist;
+                selDist.appendChild(opt);
+            });
+        });
+    </script>
+</body>
+</html>

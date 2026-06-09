@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código fuente
-COPY src/denuncias_producer.py src/
+# El código se monta por volumen en docker-compose, o se puede copiar aquí:
+COPY streaming/producer.py streaming/
 
 # Definir comando por defecto
-CMD ["python", "src/denuncias_producer.py"]
+CMD ["python", "streaming/producer.py"]
