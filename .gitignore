@@ -1,0 +1,20 @@
+# Entornos Virtuales
+venv/
+env/
+.env
+
+# Carpetas de Datos (¡NO SUBIR A GITHUB!)
+data/
+minio_data/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# SO
+.DS_Store
+Thumbs.db
