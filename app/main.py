@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.routes import main_bp
-from app.kafka_services import kafka_listener
+from app.services.kafka_services import kafka_listener
 
 # Forzar ruta absoluta para los templates
 template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'templates'))

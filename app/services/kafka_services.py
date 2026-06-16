@@ -5,10 +5,10 @@ import sys
 from kafka import KafkaConsumer, KafkaProducer
 
 # Agregar raíz al sys.path para importaciones
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config.settings import KAFKA_BROKER, KAFKA_TOPIC_OUT, KAFKA_GROUP_ID
-from app.stats_store import stats, eventos_recientes, guardar_stats
-import app.stats_store as store
+from app.services.stats_store import stats, eventos_recientes, guardar_stats
+import app.services.stats_store as store
 
 _counter_since_save = 0
 producer = None

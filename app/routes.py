@@ -8,8 +8,8 @@ import os
 # Rutas para el sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.settings import KAFKA_TOPIC_IN
-from app.stats_store import stats, eventos_recientes, guardar_stats
-from app.kafka_services import get_producer
+from app.services.stats_store import stats, eventos_recientes, guardar_stats
+from app.services.kafka_services import get_producer
 
 main_bp = Blueprint('main', __name__)
 
@@ -43,7 +43,7 @@ def api_data():
 def api_reset():
     """Endpoint para reiniciar el dashboard al estado histórico base (2018-2025)."""
     import subprocess
-    from app.stats_store import cargar_stats
+    from app.services.stats_store import cargar_stats
     
     # 1. Ejecutar el script que precalcula los 6.8 Millones de registros
     script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "init_historico.py")
@@ -74,7 +74,7 @@ def api_dispatch():
 def denuncia_page():
     """Renderiza la página del portal del ciudadano para denuncias manuales."""
     import json
-    ubigeo_path = os.path.join(os.path.dirname(__file__), 'ubigeo.json')
+    ubigeo_path = os.path.join(os.path.dirname(__file__), 'data', 'ubigeo.json')
     try:
         with open(ubigeo_path, 'r', encoding='utf-8') as f:
             ubigeo = json.load(f)
