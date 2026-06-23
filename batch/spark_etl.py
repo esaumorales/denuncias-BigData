@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.settings import MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, DATA_RAW_DIR, DATA_CLEAN_DIR
 
 def main():
-    print("Iniciando Job Batch ETL - Denuncias Policiales SIDPOL hacia MinIO Data Lake...")
+    print("Starting Batch ETL Job — SIDPOL Police Reports → MinIO Data Lake...")
 
     spark = SparkSession.builder \
         .appName("SISCO_Batch_ETL_SIDPOL") \
@@ -24,126 +24,125 @@ def main():
 
     spark.sparkContext.setLogLevel("WARN")
 
-    # El CSV no tiene fila de cabecera — se define el schema explícito y header=false
+    # CSV has no header row — schema is defined explicitly with English column names
     csv_path = os.path.join(DATA_RAW_DIR, "DATASET_Denuncias_Policiales_Ene 2018 a Abr 2026.csv")
 
     schema = StructType([
-        StructField("anio",         StringType(),  True),
-        StructField("mes",          StringType(),  True),
-        StructField("departamento", StringType(),  True),
-        StructField("provincia",    StringType(),  True),
-        StructField("distrito",     StringType(),  True),
-        StructField("ubigeo",       StringType(),  True),
-        StructField("tipo_hecho",   StringType(),  True),
-        StructField("cantidad",     IntegerType(), True),
+        StructField("year",       StringType(),  True),
+        StructField("month",      StringType(),  True),
+        StructField("department", StringType(),  True),
+        StructField("province",   StringType(),  True),
+        StructField("district",   StringType(),  True),
+        StructField("ubigeo",     StringType(),  True),
+        StructField("crime_type", StringType(),  True),
+        StructField("count",      IntegerType(), True),
     ])
 
-    print(f"Leyendo dataset SIDPOL desde: {csv_path}")
-    denuncias_df = spark.read \
+    print(f"Reading SIDPOL dataset from: {csv_path}")
+    df = spark.read \
         .option("header", "false") \
         .option("encoding", "UTF-8") \
         .option("quote", '"') \
         .schema(schema) \
         .csv(csv_path)
 
-    # Limpieza básica
-    clean_df = denuncias_df \
-        .filter(col("departamento").isNotNull()) \
-        .filter(col("distrito").isNotNull()) \
-        .filter(col("tipo_hecho").isNotNull()) \
-        .filter(col("cantidad") > 0) \
-        .filter(col("anio").cast("int").isNotNull()) \
-        .filter(col("anio").cast("int") <= 2025)
+    # Basic cleaning
+    clean_df = df \
+        .filter(col("department").isNotNull()) \
+        .filter(col("district").isNotNull()) \
+        .filter(col("crime_type").isNotNull()) \
+        .filter(col("count") > 0) \
+        .filter(col("year").cast("int").isNotNull()) \
+        .filter(col("year").cast("int") <= 2025)
 
     total = clean_df.count()
-    print(f"Total de registros limpios a procesar: {total:,}")
+    print(f"Clean records to process: {total:,}")
 
-    # 1. Ranking de distritos
-    print("Calculando ranking de distritos...")
-    ranking_df = clean_df.groupBy("departamento", "provincia", "distrito") \
-                         .agg(spark_sum("cantidad").alias("total_denuncias")) \
-                         .orderBy(desc("total_denuncias"))
-    ranking_df.write.mode("overwrite").parquet("s3a://clean-data/denuncias_parquet/ranking_distritos/")
+    # 1. District ranking
+    print("Computing district ranking...")
+    ranking_df = clean_df.groupBy("department", "province", "district") \
+                         .agg(spark_sum("count").alias("total_count")) \
+                         .orderBy(desc("total_count"))
+    ranking_df.write.mode("overwrite").parquet("s3a://clean-data/reports_parquet/district_ranking/")
 
-    # 2. Top tipos de hecho por departamento
-    print("Calculando top tipos de hecho por departamento...")
-    tipos_df = clean_df.groupBy("departamento", "tipo_hecho") \
-                       .agg(spark_sum("cantidad").alias("total_denuncias")) \
-                       .orderBy("departamento", desc("total_denuncias"))
-    tipos_df.write.mode("overwrite").parquet("s3a://clean-data/denuncias_parquet/tipos_hecho/")
+    # 2. Top crime types by department
+    print("Computing top crime types by department...")
+    crime_types_df = clean_df.groupBy("department", "crime_type") \
+                             .agg(spark_sum("count").alias("total_count")) \
+                             .orderBy("department", desc("total_count"))
+    crime_types_df.write.mode("overwrite").parquet("s3a://clean-data/reports_parquet/crime_types/")
 
-    # 3. Tendencia temporal
-    print("Calculando tendencia temporal...")
-    tendencia_df = clean_df.groupBy("anio", "mes", "departamento") \
-                           .agg(spark_sum("cantidad").alias("total_denuncias")) \
-                           .orderBy("anio", "mes")
-    tendencia_df.write.mode("overwrite").parquet("s3a://clean-data/denuncias_parquet/tendencia_temporal/")
+    # 3. Temporal trend
+    print("Computing temporal trend...")
+    trend_df = clean_df.groupBy("year", "month", "department") \
+                       .agg(spark_sum("count").alias("total_count")) \
+                       .orderBy("year", "month")
+    trend_df.write.mode("overwrite").parquet("s3a://clean-data/reports_parquet/temporal_trend/")
 
-    # 4. Exportar stats al JSON local para el dashboard (serving layer)
-    print("Exportando stats batch al dashboard...")
+    # 4. Export aggregated stats to local JSON for the serving layer (dashboard)
+    print("Exporting batch stats to dashboard serving layer...")
 
-    total_denuncias = int(clean_df.agg(spark_sum("cantidad")).collect()[0][0] or 0)
+    total_reports = int(clean_df.agg(spark_sum("count")).collect()[0][0] or 0)
 
-    top_tipo_hecho = {
-        row["tipo_hecho"]: int(row["total"])
-        for row in clean_df.groupBy("tipo_hecho")
-                           .agg(spark_sum("cantidad").alias("total"))
+    top_crime_types = {
+        row["crime_type"]: int(row["total"])
+        for row in clean_df.groupBy("crime_type")
+                           .agg(spark_sum("count").alias("total"))
                            .collect()
-        if row["tipo_hecho"]
+        if row["crime_type"]
     }
 
-    top_departamento = {
-        row["departamento"]: int(row["total"])
-        for row in clean_df.groupBy("departamento")
-                           .agg(spark_sum("cantidad").alias("total"))
+    top_departments = {
+        row["department"]: int(row["total"])
+        for row in clean_df.groupBy("department")
+                           .agg(spark_sum("count").alias("total"))
                            .collect()
-        if row["departamento"]
+        if row["department"]
     }
 
-    mapa_ubicaciones = {
-        f"{r['departamento']}|{r['provincia']}|{r['distrito']}": int(r["total"])
-        for r in clean_df.groupBy("departamento", "provincia", "distrito")
-                         .agg(spark_sum("cantidad").alias("total"))
+    location_map = {
+        f"{r['department']}|{r['province']}|{r['district']}": int(r["total"])
+        for r in clean_df.groupBy("department", "province", "district")
+                         .agg(spark_sum("count").alias("total"))
                          .collect()
-        if r["departamento"] and r["distrito"]
+        if r["department"] and r["district"]
     }
 
-    # Timeline: agrupa por anio+mes si mes existe, solo por anio si no
-    timeline_rows = clean_df.groupBy("anio", "mes") \
-                            .agg(spark_sum("cantidad").alias("total")) \
+    timeline_rows = clean_df.groupBy("year", "month") \
+                            .agg(spark_sum("count").alias("total")) \
                             .collect()
-    has_mes = any(r["mes"] is not None for r in timeline_rows)
-    if has_mes:
+    has_month = any(r["month"] is not None for r in timeline_rows)
+    if has_month:
         timeline = {
-            f"{r['anio']}-{str(r['mes']).zfill(2)}": int(r["total"])
+            f"{r['year']}-{str(r['month']).zfill(2)}": int(r["total"])
             for r in timeline_rows
-            if r["anio"] and r["mes"] and "nan" not in str(r["anio"])
+            if r["year"] and r["month"] and "nan" not in str(r["year"])
         }
     else:
         timeline = {
-            r["anio"]: int(r["total"])
+            r["year"]: int(r["total"])
             for r in timeline_rows
-            if r["anio"] and "nan" not in str(r["anio"])
+            if r["year"] and "nan" not in str(r["year"])
         }
 
     batch_stats = {
-        "total_denuncias":  total_denuncias,
-        "alertas_criticas": 0,
-        "ultima_alerta":    "Carga batch completada (2018-2025)",
-        "top_tipo_hecho":   top_tipo_hecho,
-        "top_departamento": top_departamento,
-        "mapa_ubicaciones": mapa_ubicaciones,
-        "timeline":         timeline,
+        "total_reports":   total_reports,
+        "critical_alerts": 0,
+        "last_alert":      "Batch load complete (2018-2025)",
+        "top_crime_types": top_crime_types,
+        "top_departments": top_departments,
+        "location_map":    location_map,
+        "timeline":        timeline,
     }
 
     stats_path = os.path.join(DATA_CLEAN_DIR, "sisco_stats.json")
     os.makedirs(DATA_CLEAN_DIR, exist_ok=True)
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(batch_stats, f, ensure_ascii=False, indent=2)
-    print(f"Stats batch guardadas en: {stats_path}")
-    print(f"Total denuncias pre-cargadas: {total_denuncias:,}")
+    print(f"Batch stats saved to: {stats_path}")
+    print(f"Total reports loaded: {total_reports:,}")
 
-    print("ETL Batch SISCO completado exitosamente.")
+    print("Batch ETL completed successfully.")
     spark.stop()
 
 if __name__ == "__main__":

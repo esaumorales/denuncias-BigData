@@ -221,24 +221,22 @@
         });
 
         function updateCharts(s, events) {
-            if (s.top_tipos && s.top_tipos.length > 0) {
-                chartTipos.data.labels = s.top_tipos.map(t => t.tipo);
-                chartTipos.data.datasets[0].data = s.top_tipos.map(t => t.cantidad);
+            if (s.top_crime_types && s.top_crime_types.length > 0) {
+                chartTipos.data.labels = s.top_crime_types.map(t => t.crime_type);
+                chartTipos.data.datasets[0].data = s.top_crime_types.map(t => t.count);
                 chartTipos.update();
             }
-            if (s.top_departamentos && s.top_departamentos.length > 0) {
-                chartDeptos.data.labels = s.top_departamentos.map(d => d.departamento);
-                chartDeptos.data.datasets[0].data = s.top_departamentos.map(d => d.cantidad);
+            if (s.top_departments && s.top_departments.length > 0) {
+                chartDeptos.data.labels = s.top_departments.map(d => d.department);
+                chartDeptos.data.datasets[0].data = s.top_departments.map(d => d.count);
                 chartDeptos.update();
             }
-            
+
             if (events && events.length > 0) {
-                // Polar Area
                 const crits = {};
                 events.forEach(e => {
-                    // Contar criticos
                     if (e.is_critical) {
-                        crits[e.tipo_hecho] = (crits[e.tipo_hecho] || 0) + 1;
+                        crits[e.crime_type] = (crits[e.crime_type] || 0) + 1;
                     }
                 });
 
@@ -268,29 +266,29 @@
             let html = '';
             events.forEach(ev => {
                 const isCrit = ev.is_critical;
-                const isNew = !seenIds.has(ev.id);
+                const isNew  = !seenIds.has(ev.id);
                 if (isNew) seenIds.add(ev.id);
 
                 const badge = isCrit
-                    ? '<span class="badge badge-err">Crítico</span>'
+                    ? '<span class="badge badge-err">Critical</span>'
                     : '<span class="badge badge-ok">Normal</span>';
 
                 let action = '&mdash;';
-                if (ev.estado_respuesta === 'PATRULLA ENVIADA') {
-                    action = '<span class="sent">✔️ Patrulla enviada</span>';
+                if (ev.response_status === 'UNIT DISPATCHED') {
+                    action = '<span class="sent">✔️ Unit dispatched</span>';
                 } else if (isCrit) {
-                    action = `<button class="btn-patrulla" onclick="dispatch('${ev.id}')">Enviar Unidad</button>`;
+                    action = `<button class="btn-patrulla" onclick="dispatch('${ev.id}')">Dispatch Unit</button>`;
                 }
 
                 html += `<tr class="${isCrit ? 'critical' : ''} ${isNew ? 'row-new' : ''}">
                     <td>${badge}</td>
-                    <td style="font-weight:600; color:var(--text-main)">${ev.tipo_hecho}</td>
-                    <td>${ev.subtipo_hecho || '&mdash;'}</td>
-                    <td style="font-weight:600">${ev.departamento}</td>
-                    <td>${ev.provincia || '&mdash;'}</td>
-                    <td>${ev.distrito || '&mdash;'}</td>
-                    <td style="text-align:center; font-weight:700">${ev.cantidad || 1}</td>
-                    <td style="color:var(--text-muted)">${ev.anio || '&mdash;'} / ${ev.mes || '&mdash;'}</td>
+                    <td style="font-weight:600; color:var(--text-main)">${ev.crime_type || '&mdash;'}</td>
+                    <td>${ev.crime_subtype || '&mdash;'}</td>
+                    <td style="font-weight:600">${ev.department || '&mdash;'}</td>
+                    <td>${ev.province || '&mdash;'}</td>
+                    <td>${ev.district || '&mdash;'}</td>
+                    <td style="text-align:center; font-weight:700">${ev.count || 1}</td>
+                    <td style="color:var(--text-muted)">${ev.year || '&mdash;'} / ${ev.month || '&mdash;'}</td>
                     <td>${action}</td>
                 </tr>`;
             });
@@ -305,21 +303,21 @@
         // ─── MAIN POLL ───────────────────────────────────────────────────
         async function fetchData() {
             try {
-                const anio  = document.getElementById('filter-anio')?.value  || '';
-                const depto = document.getElementById('filter-depto')?.value || '';
+                const year = document.getElementById('filter-anio')?.value  || '';
+                const dept = document.getElementById('filter-depto')?.value || '';
                 const params = new URLSearchParams();
-                if (anio)  params.set('anio', anio);
-                if (depto) params.set('departamento', depto);
+                if (year) params.set('year', year);
+                if (dept) params.set('department', dept);
                 const res = await fetch('/api/data?' + params.toString());
                 const data = await res.json();
                 const s = data.stats;
 
-                document.getElementById('s-total').textContent = (s.total_denuncias || 0).toLocaleString();
-                document.getElementById('s-crit').textContent = (s.alertas_criticas || 0).toLocaleString();
-                document.getElementById('s-ultima').textContent = s.ultima_alerta || 'Sin alertas críticas recientes';
+                document.getElementById('s-total').textContent = (s.total_reports || 0).toLocaleString();
+                document.getElementById('s-crit').textContent = (s.critical_alerts || 0).toLocaleString();
+                document.getElementById('s-ultima').textContent = s.last_alert || 'No critical alerts yet';
 
                 updateCharts(s, data.events);
-                updateHeatmap(s.mapa_distritos);
+                updateHeatmap(s.location_map);
                 renderTable(data.events);
             } catch (e) {
                 console.error('SISCO fetch error:', e);

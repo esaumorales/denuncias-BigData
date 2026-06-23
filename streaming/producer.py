@@ -136,27 +136,24 @@ def simular_streaming(producer):
                 mes  = str(row.get('mes', row.get('MES', ''))).strip()
 
                 evento = {
-                    "id": f"SIDPOL-{int(time.time()*1000)}-{random.randint(1000,9999)}",
-                    "anio": anio,
-                    "mes": mes,
-                    "departamento": departamento,
-                    "provincia": provincia,
-                    "distrito": distrito,
-                    "tipo_hecho": tipo_hecho,
-                    "modalidad": modalidad,
-                    "cantidad": cantidad,
-                    "timestamp_emision": datetime.now().isoformat(),
-                    "estado_respuesta": "PENDIENTE"
+                    "id":              f"SIDPOL-{int(time.time()*1000)}-{random.randint(1000,9999)}",
+                    "year":            anio,
+                    "month":           mes,
+                    "department":      departamento,
+                    "province":        provincia,
+                    "district":        distrito,
+                    "crime_type":      tipo_hecho,
+                    "count":           cantidad,
+                    "timestamp":       datetime.now().isoformat(),
+                    "response_status": "PENDING"
                 }
 
-                if not modalidad or not departamento:
+                if not tipo_hecho or not departamento:
                     continue
 
-                # Simular streaming SOLO para datos del 2026
+                # Stream only 2026 data (batch covers 2018-2025)
                 if str(anio).strip() != "2026":
                     continue
-                else:
-                    print(f"DEBUG - Fila de 2026 encontrada: anio={anio}, mod={modalidad}, dep={departamento}")
 
                 future = producer.send(TOPIC, value=evento)
                 future.get(timeout=15)

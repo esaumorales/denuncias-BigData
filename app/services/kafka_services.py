@@ -6,9 +6,9 @@ from kafka import KafkaConsumer, KafkaProducer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config.settings import KAFKA_BROKER, KAFKA_TOPIC_IN, KAFKA_TOPIC_OUT, KAFKA_GROUP_ID
-from app.services.stats_store import stats, eventos_recientes, guardar_stats
+from app.services.stats_store import stats, recent_events, save_stats
 
-TIPOS_CRITICOS = {
+CRITICAL_CRIME_TYPES = {
     "homicidio", "feminicidio", "robo agravado",
     "secuestro", "trata de personas", "terrorismo", "violacion sexual",
 }
@@ -27,37 +27,37 @@ def get_producer():
                 request_timeout_ms=5000
             )
         except Exception as e:
-            print(f"Advertencia: No se pudo conectar al Producer Kafka: {e}")
+            print(f"Warning: could not connect Kafka producer: {e}")
             producer = None
     return producer
 
 
-def enriquecer(data):
-    """Misma lógica de alertas que Flink — se usa solo en modo fallback."""
-    tipo     = data.get('tipo_hecho', '').lower()
-    cantidad = int(data.get('cantidad', 1))
-    distrito = data.get('distrito', '?')
-    depto    = data.get('departamento', '?')
+def enrich(event):
+    """Alert detection logic — mirrors Flink job. Used only in fallback mode."""
+    crime_type = event.get('crime_type', '').lower()
+    count      = int(event.get('count', 1))
+    district   = event.get('district', '?')
+    department = event.get('department', '?')
 
-    data['is_critical']   = False
-    data['alert_message'] = None
+    event['is_critical']   = False
+    event['alert_message'] = None
 
-    for t in TIPOS_CRITICOS:
-        if t in tipo:
-            data['is_critical']   = True
-            data['alert_message'] = (
-                f"[ALERTA CRITICA] {data.get('tipo_hecho','')} en {distrito}, {depto}. "
-                f"Casos: {cantidad}."
+    for ct in CRITICAL_CRIME_TYPES:
+        if ct in crime_type:
+            event['is_critical']   = True
+            event['alert_message'] = (
+                f"[CRITICAL ALERT] {event.get('crime_type','')} in {district}, {department}. "
+                f"Cases: {count}."
             )
             break
 
-    if not data['is_critical'] and cantidad >= 50:
-        data['is_critical']   = True
-        data['alert_message'] = (
-            f"[ALERTA VOLUMEN] Pico inusual: {data.get('tipo_hecho','')} "
-            f"en {distrito}, {depto} — {cantidad} casos."
+    if not event['is_critical'] and count >= 50:
+        event['is_critical']   = True
+        event['alert_message'] = (
+            f"[VOLUME ALERT] Unusual spike: {event.get('crime_type','')} "
+            f"in {district}, {department} — {count} cases."
         )
-    return data
+    return event
 
 
 def _make_consumer(topic):
@@ -72,49 +72,49 @@ def _make_consumer(topic):
     )
 
 
-def _procesar(data, desde_flink):
-    """Actualiza stats en memoria con un evento. Retorna False si debe ignorarse."""
+def _process(event, from_flink):
+    """Update in-memory stats with one event. Returns False if event should be skipped."""
     global _counter_since_save
 
-    if not desde_flink:
-        data = enriquecer(data)
+    if not from_flink:
+        event = enrich(event)
 
-    tipo_hecho   = data.get('tipo_hecho',   '')
-    departamento = data.get('departamento', '')
-    cantidad     = int(data.get('cantidad',  1))
+    crime_type = event.get('crime_type', '')
+    department = event.get('department', '')
+    count      = int(event.get('count', 1))
 
-    anio_evento = int(data.get('anio', 0) or 0)
-    if not tipo_hecho or not departamento:
+    year_val = int(event.get('year', 0) or 0)
+    if not crime_type or not department:
         return False
-    if anio_evento > 0 and anio_evento < 2026:
+    if year_val > 0 and year_val < 2026:
         return False
 
-    stats["total_denuncias"] += cantidad
-    stats["top_tipo_hecho"][tipo_hecho]     = stats["top_tipo_hecho"].get(tipo_hecho, 0) + cantidad
-    stats["top_departamento"][departamento] = stats["top_departamento"].get(departamento, 0) + cantidad
+    stats["total_reports"]              += count
+    stats["top_crime_types"][crime_type] = stats["top_crime_types"].get(crime_type, 0) + count
+    stats["top_departments"][department] = stats["top_departments"].get(department, 0) + count
 
-    provincia = data.get('provincia', 'Desconocido')
-    distrito  = data.get('distrito',  'Desconocido')
-    loc_key   = f"{departamento}|{provincia}|{distrito}"
-    stats["mapa_ubicaciones"][loc_key] = stats["mapa_ubicaciones"].get(loc_key, 0) + cantidad
+    province = event.get('province', 'Unknown')
+    district = event.get('district', 'Unknown')
+    loc_key  = f"{department}|{province}|{district}"
+    stats["location_map"][loc_key] = stats["location_map"].get(loc_key, 0) + count
 
-    anio = data.get('anio')
-    mes  = data.get('mes')
-    if anio and mes:
-        date_key = f"{anio}-{str(mes).zfill(2)}"
-        stats["timeline"][date_key] = stats["timeline"].get(date_key, 0) + cantidad
+    year  = event.get('year')
+    month = event.get('month')
+    if year and month:
+        date_key = f"{year}-{str(month).zfill(2)}"
+        stats["timeline"][date_key] = stats["timeline"].get(date_key, 0) + count
 
-    if data.get('is_critical'):
-        stats["alertas_criticas"] += 1
-        stats["ultima_alerta"] = data.get('alert_message', f"{tipo_hecho} en {distrito}, {departamento}")
+    if event.get('is_critical'):
+        stats["critical_alerts"] += 1
+        stats["last_alert"] = event.get('alert_message', f"{crime_type} in {district}, {department}")
 
-    eventos_recientes.insert(0, data)
-    if len(eventos_recientes) > 50:
-        eventos_recientes.pop()
+    recent_events.insert(0, event)
+    if len(recent_events) > 50:
+        recent_events.pop()
 
     _counter_since_save += 1
     if _counter_since_save >= 50:
-        guardar_stats()
+        save_stats()
         _counter_since_save = 0
 
     return True
@@ -122,57 +122,53 @@ def _procesar(data, desde_flink):
 
 def kafka_listener():
     """
-    Arquitectura Lambda — capa speed.
+    Lambda architecture — speed layer.
 
-    Modo PRINCIPAL : escucha eventos_procesados (salida de Flink).
-    Modo FALLBACK  : si Flink no produce mensajes en FLINK_TIMEOUT segundos,
-                     cambia a denuncias_sidpol y enriquece localmente.
-    Cuando Flink vuelve, regresa al modo principal automáticamente.
+    PRIMARY mode : reads from eventos_procesados (Flink output).
+    FALLBACK mode: if Flink produces no messages for FLINK_TIMEOUT seconds,
+                   switches to denuncias_sidpol and enriches locally.
+    Automatically returns to primary mode when Flink recovers.
     """
-    FLINK_TIMEOUT = 8
-
-    flink_activo         = True
-    ultimo_msg_flink     = time.time()
+    FLINK_TIMEOUT    = 8
+    flink_active     = True
+    last_flink_msg   = time.time()
 
     while True:
         time.sleep(2)
         try:
-            topic = KAFKA_TOPIC_OUT if flink_activo else KAFKA_TOPIC_IN
-            modo  = "Flink → eventos_procesados" if flink_activo else "FALLBACK → denuncias_sidpol"
-            print(f"[SISCO] Listener modo: {modo}")
+            topic = KAFKA_TOPIC_OUT if flink_active else KAFKA_TOPIC_IN
+            mode  = "Flink → eventos_procesados" if flink_active else "FALLBACK → denuncias_sidpol"
+            print(f"[SISCO] Listener mode: {mode}")
 
             consumer = _make_consumer(topic)
 
             for message in consumer:
                 try:
-                    data        = json.loads(message.value)
-                    desde_flink = (message.topic == KAFKA_TOPIC_OUT)
+                    event      = json.loads(message.value)
+                    from_flink = (message.topic == KAFKA_TOPIC_OUT)
 
-                    if desde_flink:
-                        ultimo_msg_flink = time.time()
+                    if from_flink:
+                        last_flink_msg = time.time()
 
-                    _procesar(data, desde_flink)
+                    _process(event, from_flink)
 
                 except Exception as e:
-                    print(f"Error procesando mensaje: {e}")
+                    print(f"Error processing message: {e}")
 
             consumer.close()
-            guardar_stats()
+            save_stats()
 
-            # — Lógica de detección de estado de Flink —
-            seg_sin_flink = time.time() - ultimo_msg_flink
-            if flink_activo and seg_sin_flink > FLINK_TIMEOUT:
-                print(f"[SISCO] Flink sin output {seg_sin_flink:.0f}s — activando fallback.")
-                flink_activo = False
-
-            elif not flink_activo:
-                # Sondear brevemente si Flink volvió
+            sec_without_flink = time.time() - last_flink_msg
+            if flink_active and sec_without_flink > FLINK_TIMEOUT:
+                print(f"[SISCO] Flink silent for {sec_without_flink:.0f}s — enabling fallback.")
+                flink_active = False
+            elif not flink_active:
                 try:
                     test = _make_consumer(KAFKA_TOPIC_OUT)
                     for _ in test:
-                        ultimo_msg_flink = time.time()
-                        flink_activo = True
-                        print("[SISCO] Flink activo de nuevo — regresando al modo principal.")
+                        last_flink_msg = time.time()
+                        flink_active   = True
+                        print("[SISCO] Flink recovered — returning to primary mode.")
                         break
                     test.close()
                 except Exception:
@@ -181,5 +177,5 @@ def kafka_listener():
             time.sleep(3)
 
         except Exception as e:
-            print(f"Error en listener Kafka: {e} — reintentando en 5s...")
+            print(f"Kafka listener error: {e} — retrying in 5s...")
             time.sleep(5)
