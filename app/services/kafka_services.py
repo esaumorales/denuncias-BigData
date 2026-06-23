@@ -51,8 +51,11 @@ def kafka_listener():
                     departamento = data.get('departamento', 'Desconocido')
                     cantidad     = int(data.get('cantidad',  1))
 
-                    # Ignorar registros vacíos
+                    # Ignorar registros vacíos o de años ya cubiertos por el batch (hasta 2025)
+                    anio_evento = int(data.get('anio', 0) or 0)
                     if not tipo_hecho or not departamento or tipo_hecho == 'Desconocido':
+                        continue
+                    if anio_evento > 0 and anio_evento < 2026:
                         continue
 
                     stats["total_denuncias"] += cantidad

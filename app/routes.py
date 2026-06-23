@@ -19,24 +19,53 @@ def index():
 
 @main_bp.route('/api/data')
 def api_data():
-    # Top-5 para barras
-    top_tipos  = sorted(stats["top_tipo_hecho"].items(),   key=lambda x: x[1], reverse=True)[:5]
-    top_deptos = sorted(stats["top_departamento"].items(), key=lambda x: x[1], reverse=True)[:5]
+    anio_filter = request.args.get('anio', '').strip()
+    dept_filter = request.args.get('departamento', '').strip().upper()
 
-    # Top 300 distritos para no saturar Leaflet en el frontend
-    todos_loc = sorted(stats["mapa_ubicaciones"].items(), key=lambda x: x[1], reverse=True)[:300]
+    # Timeline filtrado por año
+    timeline = stats.get("timeline", {})
+    if anio_filter:
+        timeline = {k: v for k, v in timeline.items() if k.startswith(anio_filter)}
+
+    # Mapa filtrado por departamento
+    mapa = stats.get("mapa_ubicaciones", {})
+    if dept_filter:
+        mapa = {k: v for k, v in mapa.items() if k.upper().startswith(dept_filter)}
+    todos_loc = sorted(mapa.items(), key=lambda x: x[1], reverse=True)[:300]
+
+    # Top departamentos filtrado
+    top_deptos_src = stats["top_departamento"]
+    if dept_filter:
+        top_deptos_src = {k: v for k, v in top_deptos_src.items() if dept_filter in k.upper()}
+    top_deptos = sorted(top_deptos_src.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # Top tipos — no hay desglose por año/dept, se muestran globales
+    top_tipos = sorted(stats["top_tipo_hecho"].items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # Total filtrado por departamento (suma desde mapa)
+    if dept_filter:
+        total = sum(v for k, v in stats.get("mapa_ubicaciones", {}).items() if k.upper().startswith(dept_filter))
+    else:
+        total = stats["total_denuncias"]
+
+    # Eventos filtrados
+    eventos = list(eventos_recientes)
+    if anio_filter:
+        eventos = [e for e in eventos if str(e.get('anio', '')) == anio_filter]
+    if dept_filter:
+        eventos = [e for e in eventos if e.get('departamento', '').upper() == dept_filter]
 
     return jsonify({
         "stats": {
-            "total_denuncias":  stats["total_denuncias"],
-            "alertas_criticas": stats["alertas_criticas"],
-            "ultima_alerta":    stats["ultima_alerta"],
-            "top_tipos":        [{"tipo": k, "cantidad": v} for k, v in top_tipos],
+            "total_denuncias":   total,
+            "alertas_criticas":  stats["alertas_criticas"],
+            "ultima_alerta":     stats["ultima_alerta"],
+            "top_tipos":         [{"tipo": k, "cantidad": v} for k, v in top_tipos],
             "top_departamentos": [{"departamento": k, "cantidad": v} for k, v in top_deptos],
-            "mapa_distritos":   [{"loc": k, "cantidad": v} for k, v in todos_loc],
-            "timeline":         stats.get("timeline", {})
+            "mapa_distritos":    [{"loc": k, "cantidad": v} for k, v in todos_loc],
+            "timeline":          timeline
         },
-        "events": eventos_recientes
+        "events": eventos
     })
 
 @main_bp.route('/api/reset', methods=['POST'])

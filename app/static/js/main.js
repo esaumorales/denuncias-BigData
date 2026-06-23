@@ -305,7 +305,12 @@
         // ─── MAIN POLL ───────────────────────────────────────────────────
         async function fetchData() {
             try {
-                const res = await fetch('/api/data');
+                const anio  = document.getElementById('filter-anio')?.value  || '';
+                const depto = document.getElementById('filter-depto')?.value || '';
+                const params = new URLSearchParams();
+                if (anio)  params.set('anio', anio);
+                if (depto) params.set('departamento', depto);
+                const res = await fetch('/api/data?' + params.toString());
                 const data = await res.json();
                 const s = data.stats;
 
@@ -334,6 +339,13 @@
                 });
                 fetchData();
             } catch (e) { console.error(e); }
+        }
+
+        // ─── CLEAR FILTERS ───────────────────────────────────────────────
+        function clearFilters() {
+            document.getElementById('filter-anio').value  = '';
+            document.getElementById('filter-depto').value = '';
+            fetchData();
         }
 
         // ─── RESET STATS ─────────────────────────────────────────────────

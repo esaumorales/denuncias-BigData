@@ -43,6 +43,36 @@
         </div>
     </header>
 
+    <!-- ═══ FILTER BAR ═══ -->
+    <div class="filter-bar">
+        <span class="filter-label">Filtros:</span>
+        <select id="filter-anio" onchange="fetchData()">
+            <option value="">Todos los años</option>
+            <option value="2018">2018</option>
+            <option value="2019">2019</option>
+            <option value="2020">2020</option>
+            <option value="2021">2021</option>
+            <option value="2022">2022</option>
+            <option value="2023">2023</option>
+            <option value="2024">2024</option>
+            <option value="2025">2025</option>
+            <option value="2026">2026 (Streaming)</option>
+        </select>
+        <select id="filter-depto" onchange="fetchData()">
+            <option value="">Todos los departamentos</option>
+            <option>AMAZONAS</option><option>ANCASH</option><option>APURIMAC</option>
+            <option>AREQUIPA</option><option>AYACUCHO</option><option>CAJAMARCA</option>
+            <option>CALLAO</option><option>CUSCO</option><option>HUANCAVELICA</option>
+            <option>HUANUCO</option><option>ICA</option><option>JUNIN</option>
+            <option>LA LIBERTAD</option><option>LAMBAYEQUE</option><option>LIMA</option>
+            <option>LORETO</option><option>MADRE DE DIOS</option><option>MOQUEGUA</option>
+            <option>PASCO</option><option>PIURA</option><option>PUNO</option>
+            <option>SAN MARTIN</option><option>TACNA</option><option>TUMBES</option>
+            <option>UCAYALI</option>
+        </select>
+        <button class="btn-clear-filters" onclick="clearFilters()">✕ Limpiar filtros</button>
+    </div>
+
     <main>
 
         <!-- ═══ STAT CARDS ═══ -->

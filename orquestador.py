@@ -27,36 +27,34 @@ def main():
     print("\nEsperando 10 segundos para que MinIO se estabilice e inicialice los buckets...")
     time.sleep(10)
     
-    # 2. Levantar Dashboard Interactivo y Generador de Tweets
-    print("\n[Paso 2] Iniciando el Dashboard Web y el Generador de Denuncias...")
-    
+    # 2. Lanzar PySpark Batch ETL (SÍNCRONO — debe terminar antes de arrancar el dashboard)
+    print("\n[Paso 2] Ejecutando PySpark ETL Batch (histórico 2018-2025)...")
+    print("Esto puede tardar varios minutos. El dashboard arrancará al finalizar.")
+    pyspark_cmd = (
+        "docker exec jupyter-pyspark "
+        "spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 "
+        "/home/jovyan/work/batch/spark_etl.py"
+    )
+    run_command(pyspark_cmd, "Submit Batch ETL a PySpark")
+
+    # 3. Levantar Dashboard y Producer (después del batch para que lea el JSON histórico)
+    print("\n[Paso 3] Iniciando el Dashboard Web y el Generador de Denuncias (streaming 2026)...")
+
     if sys.platform.startswith("win"):
-        # Windows
         subprocess.Popen("start python app/main.py", shell=True)
         print("Esperando 3 segundos a que levante el servidor web...")
         time.sleep(3)
         webbrowser.open("http://localhost:5000")
         subprocess.Popen("start python streaming/producer.py", shell=True)
     else:
-        # Linux/Mac
         subprocess.Popen("python app/main.py &", shell=True)
         print("Esperando 3 segundos a que levante el servidor web...")
         time.sleep(3)
         webbrowser.open("http://localhost:5000")
         subprocess.Popen("python streaming/producer.py &", shell=True)
-        
+
     print("Dashboard abierto y Productor de Kafka lanzado en segundo plano.")
-    
-    # 3. Lanzar PySpark Batch ETL en Jupyter
-    print("\n[Paso 3] Ejecutando PySpark ETL Batch...")
-    # Podemos enviar el comando de ejecución de PySpark dentro del contenedor de Jupyter
-    pyspark_cmd = (
-        "docker exec -d jupyter-pyspark "
-        "spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 "
-        "/home/jovyan/work/batch/spark_etl.py"
-    )
-    run_command(pyspark_cmd, "Submit Batch ETL a PySpark")
-    
+
     # 4. Lanzar Flink Streaming Job
     print("\n[Paso 4] Lanzando Job de Flink Streaming (PyFlink)...")
     print("Nota: Este comando requiere que el contenedor de Flink tenga Python instalado.")
