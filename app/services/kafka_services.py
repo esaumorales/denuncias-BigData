@@ -62,11 +62,16 @@ def enriquecer(data):
 
 def kafka_listener():
     global _counter_since_save
+    # IDs procesados desde eventos_procesados (Flink) para evitar duplicados desde topic_in
+    ids_flink = set()
+
     while True:
         time.sleep(2)
         try:
+            # Escucha ambos topics: primero Flink (enriquecido), luego fallback a topic_in
             consumer = KafkaConsumer(
-                KAFKA_TOPIC_IN,   # Lee directo de denuncias_sidpol, sin depender de Flink
+                KAFKA_TOPIC_OUT,  # eventos_procesados (Flink)
+                KAFKA_TOPIC_IN,   # denuncias_sidpol (fallback si Flink no corre)
                 bootstrap_servers=[KAFKA_BROKER],
                 auto_offset_reset='latest',
                 enable_auto_commit=True,
@@ -74,14 +79,22 @@ def kafka_listener():
                 value_deserializer=lambda x: x.decode('utf-8'),
                 consumer_timeout_ms=5000,
             )
-            print("Dashboard SISCO conectado a Kafka — escuchando denuncias_sidpol...")
+            print("Dashboard SISCO conectado a Kafka — escuchando eventos_procesados + denuncias_sidpol...")
 
             for message in consumer:
                 try:
                     data = json.loads(message.value)
+                    evento_id = data.get('id', '')
 
-                    # Enriquecer con lógica de alertas (equivalente a Flink)
-                    data = enriquecer(data)
+                    if message.topic == KAFKA_TOPIC_OUT:
+                        # Viene de Flink: ya está enriquecido
+                        if evento_id:
+                            ids_flink.add(evento_id)
+                    else:
+                        # Viene de denuncias_sidpol: solo procesar si Flink no lo manejó
+                        if evento_id and evento_id in ids_flink:
+                            continue
+                        data = enriquecer(data)
 
                     tipo_hecho   = data.get('tipo_hecho',   '')
                     departamento = data.get('departamento', '')
@@ -129,6 +142,9 @@ def kafka_listener():
                     if _counter_since_save >= 50:
                         guardar_stats()
                         _counter_since_save = 0
+                        # Evitar que ids_flink crezca sin límite
+                        if len(ids_flink) > 5000:
+                            ids_flink.clear()
 
                 except Exception as e:
                     print(f"Error procesando mensaje: {e}")
