@@ -4,11 +4,15 @@ import os
 import sys
 from kafka import KafkaConsumer, KafkaProducer
 
-# Agregar raíz al sys.path para importaciones
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.settings import KAFKA_BROKER, KAFKA_TOPIC_OUT, KAFKA_GROUP_ID
+from config.settings import KAFKA_BROKER, KAFKA_TOPIC_IN, KAFKA_TOPIC_OUT, KAFKA_GROUP_ID
 from app.services.stats_store import stats, eventos_recientes, guardar_stats
 import app.services.stats_store as store
+
+TIPOS_CRITICOS = {
+    "homicidio", "feminicidio", "robo agravado",
+    "secuestro", "trata de personas", "terrorismo", "violacion sexual",
+}
 
 _counter_since_save = 0
 producer = None
@@ -27,13 +31,42 @@ def get_producer():
             producer = None
     return producer
 
+def enriquecer(data):
+    """Aplica la misma lógica de alertas que Flink, por si Flink no está activo."""
+    tipo = data.get('tipo_hecho', '').lower()
+    cantidad = int(data.get('cantidad', 1))
+    distrito = data.get('distrito', '?')
+    departamento = data.get('departamento', '?')
+
+    data['is_critical'] = False
+    data['alert_message'] = None
+
+    for t in TIPOS_CRITICOS:
+        if t in tipo:
+            data['is_critical'] = True
+            data['alert_message'] = (
+                f"[ALERTA CRITICA] {data.get('tipo_hecho','')} en {distrito}, {departamento}. "
+                f"Casos: {cantidad}."
+            )
+            break
+
+    if not data['is_critical'] and cantidad >= 50:
+        data['is_critical'] = True
+        data['alert_message'] = (
+            f"[ALERTA VOLUMEN] Pico inusual: {data.get('tipo_hecho','')} "
+            f"en {distrito}, {departamento} — {cantidad} casos."
+        )
+
+    return data
+
+
 def kafka_listener():
     global _counter_since_save
     while True:
         time.sleep(2)
         try:
             consumer = KafkaConsumer(
-                KAFKA_TOPIC_OUT,
+                KAFKA_TOPIC_IN,   # Lee directo de denuncias_sidpol, sin depender de Flink
                 bootstrap_servers=[KAFKA_BROKER],
                 auto_offset_reset='latest',
                 enable_auto_commit=True,
@@ -41,19 +74,22 @@ def kafka_listener():
                 value_deserializer=lambda x: x.decode('utf-8'),
                 consumer_timeout_ms=5000,
             )
-            print("Dashboard SISCO conectado a Kafka — escuchando eventos_procesados (desde Flink)...")
+            print("Dashboard SISCO conectado a Kafka — escuchando denuncias_sidpol...")
 
             for message in consumer:
                 try:
                     data = json.loads(message.value)
 
-                    tipo_hecho   = data.get('tipo_hecho',   'Desconocido')
-                    departamento = data.get('departamento', 'Desconocido')
+                    # Enriquecer con lógica de alertas (equivalente a Flink)
+                    data = enriquecer(data)
+
+                    tipo_hecho   = data.get('tipo_hecho',   '')
+                    departamento = data.get('departamento', '')
                     cantidad     = int(data.get('cantidad',  1))
 
                     # Ignorar registros vacíos o de años ya cubiertos por el batch (hasta 2025)
                     anio_evento = int(data.get('anio', 0) or 0)
-                    if not tipo_hecho or not departamento or tipo_hecho == 'Desconocido':
+                    if not tipo_hecho or not departamento:
                         continue
                     if anio_evento > 0 and anio_evento < 2026:
                         continue
